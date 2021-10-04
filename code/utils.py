@@ -73,6 +73,15 @@ def process_image(img, n_center_points=6):
 
 
 def hinted_image(img, keepdims=False, border=0):
+    """
+    Generates a boolean 2D-hint-image by thresholding of gray values, representing the points relevant for center point determination
+    with True and all other ones with False.
+    :param img: A 3D-numpy.ndarray (HxWxD) of image RBG-values.
+    :param keepdims: Bool; if set, the last dimension will be kept.
+    :param border: The size of the border excluded from the hint map to prevent finding center points in the
+    irregularities at the image borders.
+    :return: A boolean 2D-numpy.ndarray.
+    """
     hi = np.mean(img, axis=-1, keepdims=keepdims) < 170
 
     if border != 0:
@@ -86,10 +95,24 @@ def hinted_image(img, keepdims=False, border=0):
 
 
 def vh_histograms(map):
+    """
+    Build the vertical and horizontal histograms by summing up the values in each direction.
+    :param map: A 2D-numpy.ndarray (HxW).
+    :return: A tuple containing the histograms of the values for each row and for each column of the input matrix.
+    """
     return np.sum(map, axis=1), np.sum(map, axis=0)
 
 
 def get_extrema(type, hist, n, disallow_r=0):
+    """
+    Gets a number of extrema (maximum or minimum) from a histogram ranked by value.
+    :param type: String; either "max" or "min".
+    :param hist: A histogram, i.e., a 1-D-numpy.ndarray of aggregated values.
+    :param n: The number of extrema to find.
+    :param disallow_r: The radius around a found extremum, in which finding another extremum is prohibited. This prevents
+    finding multiple neighboring points with a similar extremum.
+    :return: A list of points containing the found extrema as tuples (y, x).
+    """
     if type == "max":
         ranked_points = list(np.argsort(hist))
     elif type == "min":
@@ -112,6 +135,13 @@ def get_extrema(type, hist, n, disallow_r=0):
 
 
 def get_center_points(img, n_v=1, n_h=1):
+    """
+    Finds center points in an image by analyzing the maxima of the numbers of hint-points in a thesholded image.
+    :param img: A 3D-numpy.ndarray (HxWxD) of image RBG-values.
+    :param n_v: The number of rows of center points.
+    :param n_h: The number of columns of center points.
+    :return: A list of center points in tuple format (y, x).
+    """
     hi = hinted_image(img, border=30)
     v_hist, h_hist = vh_histograms(hi)
 
@@ -128,6 +158,14 @@ def get_center_points(img, n_v=1, n_h=1):
 
 
 def mark_point(point, img, color_val=(255, 255, 255), r=1):
+    """
+    Marks a point in a numpy array for debugging purposes.
+    :param point: A tuple of point coordinates in the format (y, x).
+    :param img: A 3D-numpy.ndarray (HxWxD) of image RBG-values.
+    :param color_val: A 3-tuple of an RGB color value.
+    :param r: The radius, i.e., half of the width and height of the point.
+    :return: A 3D-numpy.ndarray (HxWxD) of image RBG-values with the point marked.
+    """
     img = img.copy()
 
     img[int(point[0]) - r:int(point[0]) + r, int(point[1]) - r:int(point[1]) + r] = color_val
@@ -136,16 +174,18 @@ def mark_point(point, img, color_val=(255, 255, 255), r=1):
 
 
 def get_point_of_intersection(l1, l2):
+    """
+    Calculates the point of intersection of two lines in vector format.
+
+    v * (x1, y1) + (nx1, ny1) = w * (x2, y2) + (nx2, ny2)
+
+    :param l1: A line defined as a tuple of vectors of length 2: (np.array([x1, y1]), np.array([nx1, ny1]))
+    :param l2: A line defined as a tuple of vectors of length 2: (np.array([x2, y2]), np.array([nx2, ny2]))
+    :return: The intersection point as vector np.array([x, y]).
+    """
     # v * (x1, y1) + (nx1, ny1) = w * (x2, y2) + (nx2, ny2)
     lhs = np.array([l1[0], -l2[0]]).T
     rhs = l2[1].T - l1[1].T
-
-    """print()
-    print(l1)
-    print(l2)
-
-    print("LHS:", lhs)
-    print("RHS:", rhs)"""
 
     solution = np.linalg.solve(lhs, rhs)
 
@@ -161,6 +201,13 @@ def get_point_of_intersection(l1, l2):
 
 
 def estimate_edge_line_params(coords, vertical=False):
+    """
+    Estimate the parameters of a line defined by a series of points by regression.
+    :param coords: A list of points in the format [(y0, x0), (y1, x1), ...]
+    :param vertical: Bool; if True, the line will be regressed as vertical line, which would otherwise be infeasible
+    to calculate in function form.
+    :return: The line v * (x1, y1) + (nx1, ny1) in tuple vector format: (np.array([x, y]), np.array([nx, ny]))
+    """
     regression = REGRESSOR()
 
     coords = list(coords)
@@ -196,7 +243,22 @@ def estimate_edge_line_params(coords, vertical=False):
     return m, n
 
 
-def select_regression_points(area, indices_y, indices_x, n_considered_points, method="max"):
+def select_regression_points(area, n_considered_points, method="max"):
+    """
+    Selects a number of regression points based on a criterion depending on the method used.
+
+    :param area: A 2D-numpy.ndarray specifying the considered location by non-zero-values and the rest by zero-values.
+    :param n_considered_points: The number of points considered for regression.
+    :param method: The method to be used for selecting the points.
+        "max" - The points are selected after ranking them descendingly by value.
+        "mode_y" and "mode_x" - The points are selected depending on the statistical mode function of their y or x value.
+            This can also be seen as a majority vote of the y or x values over the descendingly ranked n considered
+            points. If, for example, the provided area there are 500 points with a nonzero value, and 50 points are to
+            be considered, the 50 points with the largest values are selected, over whose coordinates then a majority
+            vote is run to determine the most prominent y value or x value. These usually represent the most probable
+            line.
+    :return: An iterable of tuples of the shape (y, x).
+    """
     if method == "max":
         nz_indices = np.nonzero(area)
         joint = np.array(list(zip(*nz_indices)))
@@ -214,17 +276,13 @@ def select_regression_points(area, indices_y, indices_x, n_considered_points, me
 
         if method == "mode_y":
             m = mode(joint[:, 0])[0][0]
-            print(method, m)
             joint = np.array([v for v in joint if v[0] == m])
         else:
             m = mode(joint[:, 1])[0][0]
             joint = np.array([v for v in joint if v[1] == m])
 
         y_coords, x_coords = zip(*joint)
-
-        y_coords = y_coords#[:n_considered_points]
-        x_coords = x_coords#[:n_considered_points]
-    elif method in ("topmost", "bottommost", "leftmost", "rightmost"):
+        """elif method in ("topmost", "bottommost", "leftmost", "rightmost"):
         nz_indices = np.nonzero(area)
 
         joint = np.array(list(zip(*nz_indices)))
@@ -252,7 +310,7 @@ def select_regression_points(area, indices_y, indices_x, n_considered_points, me
         y_coords, x_coords = zip(*ranked)
 
         y_coords = y_coords[:n_considered_points]
-        x_coords = x_coords[:n_considered_points]
+        x_coords = x_coords[:n_considered_points]"""
     else:
         raise ValueError("Invalid method: " + method)
 
@@ -260,6 +318,16 @@ def select_regression_points(area, indices_y, indices_x, n_considered_points, me
 
 
 def correct_center_point(center_point, image, window_width, window_height):
+    """
+    Corrects the center point by running the center point determination algorithm in a smaller area instead of the
+    complete image. This usually results in a more precise center point.
+
+    :param center_point: The coordinates of the center point as tuple (y, x).
+    :param image: A 3D-numpy.ndarray (HxWxD) of image RBG-values.
+    :param window_width: The width of the image.
+    :param window_height: The height of the image.
+    :return: The corrected center point in format (y, x).
+    """
     # Create binary masks for each window quadrant
     indices_y = np.repeat(np.arange(image.shape[0])[:, None], image.shape[1], axis=1)
     indices_x = np.repeat(np.arange(image.shape[1])[None, :], image.shape[0], axis=0)
@@ -404,8 +472,6 @@ def get_window_line_coords(vertical_edge_map, horizontal_edge_map, center_point,
     for map_multiplier, vertical, method, line_area in zip(map_multipliers, vertical_regression, methods, line_areas):
         y_coords, x_coords = select_regression_points(
             line_area * map_multiplier,
-            indices_y,
-            indices_x,
             n_considered_points,
             method=method
         )
@@ -426,6 +492,11 @@ def get_corners_ltrb(corners):
 
 
 def align_corners(corners):
+    """
+    Aligns corners by placing them on the outermost coordinates of the quad.
+    :param corners: A list of corners in the order top_left, top_right, bottom_right, bottom_left,
+    :return: The aligned corners in list format.
+    """
     l, t, r, b = get_corners_ltrb(corners)
 
     corners = [
