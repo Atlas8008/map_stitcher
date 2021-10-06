@@ -9,6 +9,8 @@ from scipy.stats import mode
 
 import matplotlib.pyplot as plt
 
+DEBUG_MODE = False
+
 debug_img = None
 
 REGRESSOR = LinearRegression
@@ -42,7 +44,26 @@ def plot(img):
     plt.show()
 
 
-def process_image(img, n_center_points=6):
+def image_as_numpy(img_path, max_height=600):
+    img = Image.open(img_path)
+
+    ratio = max_height / img.size[1]  # 512 / min(*img.size)
+
+    img.thumbnail((int(img.size[0] * ratio), int(img.size[1] * ratio)))
+    img_ary = np.array(img)
+
+    return img_ary
+
+
+def save_numpy_as_img(img_ary, path):
+    img = Image.fromarray(img_ary.astype("uint8"))
+
+    img.save(path)
+
+    return img
+
+
+def process_image(img, rows, columns, regression_considered_points=N_CONSIDERED_POINTS):
     orig_img = img
 
     binarized_image = hinted_image(img)
@@ -53,7 +74,10 @@ def process_image(img, n_center_points=6):
         img,
     )
 
-    center_points = get_center_points(orig_img, n_v=1, n_h=n_center_points)
+    center_points_cols = columns - 1
+    center_points_rows = rows - 1
+
+    center_points = get_center_points(orig_img, n_v=center_points_rows, n_h=center_points_cols)
 
     # Sort center points
     center_points = sorted(center_points)
@@ -62,14 +86,18 @@ def process_image(img, n_center_points=6):
         print("Mark", center_point)
         img = mark_point(center_point, img, color_val=(0, 0, 255), r=2)
 
-    global debug_img
-    debug_img = img
+    if DEBUG_MODE:
+        global debug_img
+        debug_img = img
 
-    map_components = get_map_components(orig_img, center_points, binarized_image=binarized_image)
+    map_components = get_map_components(orig_img, center_points, n_rows=rows)
 
     corrected_map = rebuild_map(map_components)
 
-    return corrected_map.astype("uint8"), debug_img.astype("uint8")
+    if DEBUG_MODE:
+        return corrected_map.astype("uint8"), debug_img.astype("uint8")
+    else:
+        return corrected_map.astype("uint8")
 
 
 def hinted_image(img, keepdims=False, border=0):
@@ -194,8 +222,9 @@ def get_point_of_intersection(l1, l2):
     intersection = l1[0] * factor + l1[1]
 
     #print("Intersection:", intersection)
-    global debug_img
-    debug_img = mark_point(intersection[::-1], debug_img, (255, 0, 0), r=2)
+    if DEBUG_MODE:
+        global debug_img
+        debug_img = mark_point(intersection[::-1], debug_img, (255, 0, 0), r=2)
 
     return intersection
 
@@ -212,9 +241,10 @@ def estimate_edge_line_params(coords, vertical=False):
 
     coords = list(coords)
 
-    global debug_img
-    for vy, vx in coords:
-        debug_img = mark_point((vy, vx), debug_img, (0, 255, 0), r=2)
+    if DEBUG_MODE:
+        global debug_img
+        for vy, vx in coords:
+            debug_img = mark_point((vy, vx), debug_img, (0, 255, 0), r=2)
 
     y, x = zip(*coords)
 
@@ -368,6 +398,19 @@ def correct_center_point(center_point, image, window_width, window_height):
 
 def get_window_line_coords(vertical_edge_map, horizontal_edge_map, center_point, window_width, window_height,
                            search_width=8, n_considered_points=20):
+    """
+    Calculates the line coords of the borders of the fissures using regression over windowed areas of edge maps.
+
+    :param vertical_edge_map: A 2D-numpy.ndarray containing vertical edges.
+    :param horizontal_edge_map: A 2D-numpy.ndarray containing horizontal edges.
+    :param center_point: A center point (y, x) around which the line coordinates will be determined.
+    :param window_width: The width of the window in which regression points will be searched.
+    :param window_height: The height of the window in which regression points will be searched.
+    :param search_width: The width of the search bar defined by window_width * search_width in case of horizontal
+    search or window_height * search width in case of vertical search.
+    :param n_considered_points: The number of points considered for regression.
+    :return: The line coordinates in vector format (np.array([x, y]), np.array([nx, ny])).
+    """
     # Create binary masks for each window quadrant
     indices_y = np.repeat(np.arange(vertical_edge_map.shape[0])[:, None], vertical_edge_map.shape[1], axis=1)
     indices_x = np.repeat(np.arange(vertical_edge_map.shape[1])[None, :], vertical_edge_map.shape[0], axis=0)
@@ -482,7 +525,11 @@ def get_window_line_coords(vertical_edge_map, horizontal_edge_map, center_point,
 
 
 def get_corners_ltrb(corners):
-    """ Get the left, top, right and bottom dimensions of the corners """
+    """
+    Get the left, top, right and bottom dimensions of the corners
+    :param corners: A list of corners in the order top_left, top_right, bottom_right, bottom_left,
+    :return: The left, top, right and bottom values as ints.
+    """
     l = min(corners[0][0], corners[3][0])
     t = min(corners[0][1], corners[1][1])
     r = max(corners[1][0], corners[2][0])
@@ -509,15 +556,16 @@ def align_corners(corners):
     return corners
 
 
-def get_map_components(img, center_points, binarized_image, n_rows=2):
-    #vertical_edge_map = filters.sobel_v(np.mean(img, axis=-1))
-    #horizontal_edge_map = filters.sobel_h(np.mean(img, axis=-1))
-    #vertical_edge_map = filters.sobel_v(binarized_image)
-    #horizontal_edge_map = filters.sobel_h(binarized_image)
-    #vertical_edge_map = filters.prewitt_v(binarized_image)
-    #horizontal_edge_map = filters.prewitt_h(binarized_image)
-    #vertical_edge_map = filters.prewitt_v(np.mean(img, axis=-1))
-    #horizontal_edge_map = filters.prewitt_h(np.mean(img, axis=-1))
+def get_map_components(img, center_points, n_rows=2, regression_considered_points=N_CONSIDERED_POINTS):
+    """
+    Retrieves the single map components based on the center points.
+    :param img: A 3D-numpy.ndarray (HxWxD) of image RBG-values.
+    :param center_points: A list of center points in the format (y, x).
+    :param n_rows: The number of map component rows
+    :param regression_considered_points:
+    :return: A list of lists containing the map components top to bottom, left to right as 3D-numpy.ndarrays (HxWxD) of
+    image RBG-values.
+    """
     vertical_edge_map = filters.edges.convolve(np.mean(img, axis=-1), FILTER_KERNEL_V)
     horizontal_edge_map = filters.edges.convolve(np.mean(img, axis=-1), FILTER_KERNEL_H)
 
@@ -533,8 +581,8 @@ def get_map_components(img, center_points, binarized_image, n_rows=2):
 
     print("Edge maps:", vertical_edge_map.shape, horizontal_edge_map.shape, img.shape)
 
-    plot(vertical_edge_map)
-    plot(horizontal_edge_map)
+    #plot(vertical_edge_map)
+    #plot(horizontal_edge_map)
 
     # Arrange center points in a grid
     center_points_grid = np.array(center_points).reshape((n_rows - 1, -1, 2))
@@ -567,8 +615,9 @@ def get_map_components(img, center_points, binarized_image, n_rows=2):
             )
 
             print(center_point, "corrected to", corrected_center_point)
-            global debug_img
-            debug_img = mark_point(corrected_center_point, debug_img, color_val=(255, 170, 100), r=5)
+            if DEBUG_MODE:
+                global debug_img
+                debug_img = mark_point(corrected_center_point, debug_img, color_val=(255, 170, 100), r=5)
 
             wlc = get_window_line_coords(
                 vertical_edge_map=vertical_edge_map,
@@ -577,7 +626,7 @@ def get_map_components(img, center_points, binarized_image, n_rows=2):
                 window_width=window_width, # TODO: Make values relative to center points
                 window_height=window_height,
                 search_width=SEARCH_WIDTH,
-                n_considered_points=N_CONSIDERED_POINTS,
+                n_considered_points=regression_considered_points,
             )
 
             # Add right border, then the next left border
@@ -660,6 +709,12 @@ def get_map_components(img, center_points, binarized_image, n_rows=2):
 
 
 def rebuild_map(components):
+    """
+    Constructs the final map using the preconstructed components.
+    :param components: A list of lists containing the map components top to bottom, left to right as 3D-numpy.ndarrays
+    (HxWxD) of image RBG-values.
+    :return: The reconstructed map, a 3D-numpy.ndarray (HxWxD) of image RBG-values.
+    """
     col_widths = [0] * len(components[0])
     row_heights = [0] * len(components)
 

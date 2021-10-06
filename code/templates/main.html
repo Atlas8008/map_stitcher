@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Map Processor</title>
+    <script>
+        function changed() {
+            statusp.innerHTML = "";
+            const [file] = fileinput.files;
+            if (file) {
+                uploaded.src = URL.createObjectURL(file);
+            }
+        }
+    </script>
+</head>
+<body>
+    <center>
+        <form name="uploadform" method="POST" enctype="multipart/form-data">
+            <input id="fileinput" type="file" name="file" value="Upload Map" accept="image/*" onchange="changed()"/>
+            <br />
+            <br />
+            <img id="uploaded" width="200" height="200" src="" />
+            <br />
+            <br />
+            <table>
+                <tr>
+                    <td>Rows:</td>
+                    <td><input type="number" name="rows" min="2" value="2"></td>
+                </tr>
+                <tr>
+                    <td>Columns:</td>
+                    <td><input type="number" name="cols" min="2" value="3"></td>
+                </tr>
+                <tr>
+                    <br />
+                    <td>Optional Parameters (Only change, if something does not work):</td>
+                    <br />
+                </tr>
+                <tr>
+                    <td>Processing Height (px):</td>
+                    <td><input type="number" name="height" min="1" value="600"></td>
+                </tr>
+                <tr>
+                    <td>Considered Points for Regression:</td>
+                    <td><input type="number" name="n_reg_points" min="1" value="100"></td>
+                </tr>
+            </table>
+            <br />
+            <input type="submit" value="Submit">
+        </form>
+        <br />
+        <br />
+        <br />
+        Status:
+        <br />
+        <p id="statusp">{{ status }}</p>
+    </center>
+</body>
+</html>
